@@ -18,12 +18,12 @@ on:
         type: choice
         options:
           - latest
-          - v1.20.0
-          - v1.19.0
-          - v1.18.0
-          - v1.17.0
-          - v1.16.0
-          - v1.15.0
+          - v0.47.038
+          - v0.47.024
+          - v0.47.006
+          - v0.47.001
+          - v0.46.137
+          - v0.46.133
       architecture:
         description: '选择架构'
         required: true
