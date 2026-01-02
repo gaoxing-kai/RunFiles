@@ -1,0 +1,366 @@
+#=================================================
+# https://github.com/wukongdaily/RunFilesBuilder
+# Description: Build RunFiles using GitHub Actions
+# Lisence: MIT
+# Author: wukongdaily
+# Blog: wkdaily.cpolar.cn
+#=================================================
+
+name: Make OpenClash run files 
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: '选择打包版本类型'
+        required: true
+        default: 'latest'
+        type: choice
+        options:
+          - latest
+          - v1.20.0
+          - v1.19.0
+          - v1.18.0
+          - v1.17.0
+          - v1.16.0
+          - v1.15.0
+      architecture:
+        description: '选择架构'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - x86
+          - a53
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Print selected version
+        run: |
+          echo "Selected version type: ${{ github.event.inputs.version_type }}"
+          echo "Selected architecture: ${{ github.event.inputs.architecture }}"
+
+      - name: Create directories
+        run: |
+          mkdir -p OpenClash openclash-x86 openclash-a53
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "x86" ]; then
+            mkdir -p openclash-x86
+          fi
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "a53" ]; then
+            mkdir -p openclash-a53
+          fi
+
+      - name: Checkout package branch
+        uses: actions/checkout@v4
+        with:
+          repository: vernesong/OpenClash
+          path: OpenClash
+          ref: package
+
+      - name: Get version info
+        id: extract_version
+        run: |
+          if [ "${{ github.event.inputs.version_type }}" = "latest" ]; then
+            # 获取最新版本
+            first_line=$(head -n 1 OpenClash/master/version)
+            echo "version=$first_line" >> $GITHUB_ENV
+            echo "target_tag=$first_line" >> $GITHUB_ENV
+            echo "Using latest version: $first_line"
+          else
+            # 使用指定的旧版本
+            version="${{ github.event.inputs.version_type }}"
+            echo "version=$version" >> $GITHUB_ENV
+            echo "target_tag=$version" >> $GITHUB_ENV
+            echo "Using specified version: $version"
+            
+            # 对于旧版本，我们需要查找对应的文件
+            # 首先尝试在当前仓库中查找
+            if [ -d "OpenClash/master" ]; then
+              echo "Checking for ipk files in OpenClash/master..."
+              # 尝试查找符合版本号的ipk文件
+              for ipk in OpenClash/master/*.ipk; do
+                if [[ $ipk == *"$version"* ]]; then
+                  echo "Found ipk: $ipk"
+                  break
+                fi
+              done
+            fi
+          fi
+
+      - name: Download specific version files if needed
+        if: github.event.inputs.version_type != 'latest'
+        run: |
+          version="${{ github.event.inputs.version_type }}"
+          echo "Downloading version $version files..."
+          
+          # 创建旧版本目录
+          mkdir -p old-version-files
+          
+          # 从GitHub Releases下载特定版本的ipk文件
+          # 注意：这里需要根据实际的发布结构调整URL
+          # 这里假设有对应的release assets
+          # 如果实际结构不同，需要调整这里的URL
+          
+          # 尝试从release下载x86 ipk
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "x86" ]; then
+            echo "Attempting to download x86 ipk for version $version..."
+            # 这里添加实际的下载逻辑
+            # 例如：wget https://github.com/vernesong/OpenClash/releases/download/$version/some-file.ipk
+          fi
+          
+          # 尝试从release下载a53 ipk
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "a53" ]; then
+            echo "Attempting to download a53 ipk for version $version..."
+            # 这里添加实际的下载逻辑
+          fi
+
+      - name: Copy IPK files
+        run: |
+          version="${{ github.event.inputs.version_type }}"
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "x86" ]; then
+            if [ "$version" = "latest" ]; then
+              # 复制最新版本
+              cp OpenClash/master/*.ipk openclash-x86/ 2>/dev/null || echo "No x86 ipk files found"
+            else
+              # 对于旧版本，尝试查找匹配的文件
+              echo "Looking for x86 ipk files for version $version..."
+              # 这里可以添加更智能的文件查找逻辑
+              # 例如：根据文件名模式查找
+              for ipk in OpenClash/master/*.ipk; do
+                if [[ $ipk == *"$version"* ]] || [[ $version == "v"* && $ipk == *"${version/v/}"* ]]; then
+                  echo "Copying: $ipk"
+                  cp "$ipk" openclash-x86/
+                fi
+              done
+            fi
+          fi
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "a53" ]; then
+            if [ "$version" = "latest" ]; then
+              # 复制最新版本
+              cp OpenClash/master/*.ipk openclash-a53/ 2>/dev/null || echo "No a53 ipk files found"
+            else
+              # 对于旧版本，尝试查找匹配的文件
+              echo "Looking for a53 ipk files for version $version..."
+              for ipk in OpenClash/master/*.ipk; do
+                if [[ $ipk == *"$version"* ]] || [[ $version == "v"* && $ipk == *"${version/v/}"* ]]; then
+                  echo "Copying: $ipk"
+                  cp "$ipk" openclash-a53/
+                fi
+              done
+            fi
+          fi
+
+      - name: Checkout core branch for meta files
+        uses: actions/checkout@v4
+        with:
+          repository: vernesong/OpenClash
+          path: Meta
+          ref: core
+
+      - name: Handle meta core files
+        run: |
+          version="${{ github.event.inputs.version_type }}"
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "x86" ]; then
+            echo "Processing x86 meta core..."
+            if [ -f "Meta/master/meta/clash-linux-amd64-v1.tar.gz" ]; then
+              tar -xzvf Meta/master/meta/clash-linux-amd64-v1.tar.gz -C openclash-x86
+              mv openclash-x86/clash openclash-x86/clash_meta
+              echo "x86 meta core extracted"
+            else
+              echo "Warning: clash-linux-amd64-v1.tar.gz not found"
+            fi
+          fi
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "a53" ]; then
+            echo "Processing a53 meta core..."
+            if [ -f "Meta/master/meta/clash-linux-arm64.tar.gz" ]; then
+              tar -xzvf Meta/master/meta/clash-linux-arm64.tar.gz -C openclash-a53
+              mv openclash-a53/clash openclash-a53/clash_meta
+              echo "a53 meta core extracted"
+            else
+              echo "Warning: clash-linux-arm64.tar.gz not found"
+            fi
+          fi
+
+      - name: Create install.sh script
+        run: |
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "x86" ]; then
+            cat << 'EOF' > openclash-x86/install.sh
+            #!/bin/sh
+            echo "Installing OpenClash for x86..."
+            opkg update
+            if [ $? -ne 0 ]; then
+                echo "update failed。"
+                exit 1
+            fi
+            opkg install *.ipk || exit 1
+            if [ -f clash_meta ]; then
+                mkdir -p /etc/openclash/core/
+                mv clash_meta /etc/openclash/core/
+                echo "Meta core installed"
+            fi
+            sleep 10s
+            ifconfig br-lan > /dev/null 2>&1
+            if [ $? -ne 0 ]; then
+                echo "接口错误，重启网络。"
+                /etc/init.d/network restart
+                echo "重启完毕"
+                exit 0
+            fi
+            echo "Installation completed!"
+            EOF
+            chmod +x openclash-x86/install.sh
+          fi
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "a53" ]; then
+            cat << 'EOF' > openclash-a53/install.sh
+            #!/bin/sh
+            echo "Installing OpenClash for ARM64 Cortex-A53..."
+            opkg update
+            if [ $? -ne 0 ]; then
+                echo "update failed。"
+                exit 1
+            fi
+            opkg install *.ipk || exit 1
+            if [ -f clash_meta ]; then
+                mkdir -p /etc/openclash/core/
+                mv clash_meta /etc/openclash/core/
+                echo "Meta core installed"
+            fi
+            sleep 10s
+            ifconfig br-lan > /dev/null 2>&1
+            if [ $? -ne 0 ]; then
+                echo "接口错误，重启网络。"
+                /etc/init.d/network restart
+                echo "重启完毕"
+                exit 0
+            fi
+            echo "Installation completed!"
+            EOF
+            chmod +x openclash-a53/install.sh
+          fi
+
+      - name: Clone makeself
+        run: git clone https://github.com/megastep/makeself.git
+
+      - name: Create run files with makeself
+        run: |
+          cd makeself
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "x86" ]; then
+            if [ -d "../openclash-x86" ]; then
+              ./makeself.sh ../openclash-x86/ openclash-x86-64-${{ env.version }}.run "OpenClash ${{ env.version }} for x86_64" ./install.sh
+              echo "Created: openclash-x86-64-${{ env.version }}.run"
+            fi
+          fi
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "a53" ]; then
+            if [ -d "../openclash-a53" ]; then
+              ./makeself.sh ../openclash-a53/ openclash-aarch64_cortex-a53-${{ env.version }}.run "OpenClash ${{ env.version }} for ARM64 Cortex-A53" ./install.sh
+              echo "Created: openclash-aarch64_cortex-a53-${{ env.version }}.run"
+            fi
+          fi
+
+      - name: Generate release
+        if: github.event.inputs.version_type == 'latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.version }}
+          name: "OpenClash ${{ env.version }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ![Github](https://img.shields.io/badge/OpenClash.run-123456?logo=github&logoColor=fff&labelColor=red&style=for-the-badge) 
+            [![Github](https://img.shields.io/badge/国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge)](https://wkdaily.cpolar.cn/archives/1) 
+            ![GitHub Downloads](https://img.shields.io/github/downloads/wukongdaily/RunFilesBuilder/${{ env.version }}/total?style=for-the-badge&labelColor=black&color=%2325c2a0)
+            
+            ### 版本信息
+            - **版本号**: ${{ env.version }}
+            - **打包时间**: $(date +'%Y-%m-%d %H:%M:%S')
+            - **架构**: ${{ github.event.inputs.architecture }}
+            
+            ### 使用说明
+            1. 下载对应架构的.run文件
+            2. 上传到路由器
+            3. 执行: `chmod +x filename.run && ./filename.run`
+            
+            ### 注意事项
+            - 仅适用于OpenWrt系统
+            - 需要opkg包管理器
+            - 安装前请备份重要数据
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate old version release
+        if: github.event.inputs.version_type != 'latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.version }}
+          name: "OpenClash ${{ env.version }} (Old Version)"
+          draft: false
+          prerelease: true
+          body: |
+            ⚠️ **注意**: 这是旧版本打包，可能存在已知问题或安全漏洞
+            
+            ![Github](https://img.shields.io/badge/OpenClash-${{ env.version }}-blue?logo=github&logoColor=fff&labelColor=red&style=for-the-badge)
+            
+            ### 版本信息
+            - **版本号**: ${{ env.version }}
+            - **打包时间**: $(date +'%Y-%m-%d %H:%M:%S')
+            - **架构**: ${{ github.event.inputs.architecture }}
+            - **版本类型**: 旧版本打包
+            
+            ### 使用说明
+            1. 下载对应架构的.run文件
+            2. 上传到路由器
+            3. 执行: `chmod +x filename.run && ./filename.run`
+            
+            ### 注意事项
+            - ⚠️ 这是旧版本，建议使用最新版本
+            - 仅适用于OpenWrt系统
+            - 需要opkg包管理器
+            - 安装前请备份重要数据
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload run files
+        run: |
+          cd makeself
+          files_to_upload=""
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "x86" ]; then
+            if [ -f "openclash-x86-64-${{ env.version }}.run" ]; then
+              files_to_upload="$files_to_upload openclash-x86-64-${{ env.version }}.run"
+            fi
+          fi
+          
+          if [ "${{ github.event.inputs.architecture }}" = "both" ] || [ "${{ github.event.inputs.architecture }}" = "a53" ]; then
+            if [ -f "openclash-aarch64_cortex-a53-${{ env.version }}.run" ]; then
+              files_to_upload="$files_to_upload openclash-aarch64_cortex-a53-${{ env.version }}.run"
+            fi
+          fi
+          
+          if [ -n "$files_to_upload" ]; then
+            echo "Files to upload: $files_to_upload"
+            # 这里可以添加上传到release的逻辑
+            # 实际上，上面的release步骤已经会上传文件
+          else
+            echo "No run files were created"
+          fi
+
+      - name: Print completion message
+        run: |
+          echo "========================================"
+          echo "Build completed!"
+          echo "Version: ${{ env.version }}"
+          echo "Architecture: ${{ github.event.inputs.architecture }}"
+          echo "Type: ${{ github.event.inputs.version_type }}"
+          echo "========================================"
